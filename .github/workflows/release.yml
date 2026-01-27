@@ -34,18 +34,12 @@ jobs:
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
 
-      - name: Install vrc-get
-        run: |
-          # Updated URL for the new organization and asset naming convention
-          # Old: anatawa12/vrc-get/releases/.../vrc-get-x86_64-unknown-linux-musl
-          # New: vrc-get/vrc-get/releases/.../x86_64-unknown-linux-musl-vrc-get
-          curl -fL https://github.com/vrc-get/vrc-get/releases/latest/download/x86_64-unknown-linux-musl-vrc-get -o vrc-get
-          chmod +x vrc-get
-          ./vrc-get --version
+      - name: Setup vrc-get
+        uses: anatawa12/sh-actions/setup-vrc-get@master
 
       - name: Update VPM Repository
         run: |
-          ./vrc-get repo add-package package.json --repo-json index.json --url https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/com.moruton.blm-local-connector-${{ steps.version.outputs.VERSION }}.zip
+          vpm-get repo add-package package.json --repo-json index.json --url https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/com.moruton.blm-local-connector-${{ steps.version.outputs.VERSION }}.zip
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
