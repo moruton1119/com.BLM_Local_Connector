@@ -36,8 +36,11 @@ jobs:
 
       - name: Install vrc-get
         run: |
-          curl -sL https://github.com/anatawa12/vrc-get/releases/latest/download/vrc-get-x86_64-unknown-linux-musl -o vrc-get
+          # Use -f to fail if 404
+          curl -fL https://github.com/anatawa12/vrc-get/releases/latest/download/vrc-get-x86_64-unknown-linux-musl -o vrc-get
           chmod +x vrc-get
+          # Check if file is executable and valid
+          ./vrc-get --version
 
       - name: Update VPM Repository
         run: |
