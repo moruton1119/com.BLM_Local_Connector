@@ -37,7 +37,7 @@ jobs:
       - name: Update VPM Repository
         run: |
           python3 -c "
-          import json, sys, os
+          import json, sys, os, urllib.request
           pkg_path = 'package.json'
           idx_path = 'index.json'
           tag_version = '${{ steps.version.outputs.VERSION }}'
@@ -49,15 +49,18 @@ jobs:
           
           # Load package.json
           with open(pkg_path, 'r') as f: pkg = json.load(f)
-          
-          # Use tag version as the authoritative version for this release
           pkg['version'] = tag_version
           
-          # Load or create index.json
-          if os.path.exists(idx_path):
-              with open(idx_path, 'r') as f: idx = json.load(f)
-          else:
-              idx = {}
+          # Try to load existing index.json from gh-pages (via raw URL)
+          idx = {}
+          try:
+              with urllib.request.urlopen(repo_url) as response:
+                  idx = json.loads(response.read().decode())
+              print(f'Fetched existing index.json from {repo_url}')
+          except Exception as e:
+              print(f'Could not fetch existing index.json: {e}. Starting fresh or using local if exists.')
+              if os.path.exists(idx_path):
+                  with open(idx_path, 'r') as f: idx = json.load(f)
 
           # Ensure base metadata
           idx.setdefault('name', 'Moruton Laboratory')
