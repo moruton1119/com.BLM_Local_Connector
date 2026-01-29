@@ -122,30 +122,31 @@ namespace Moruton.BLMConnector
             {
                 using (var cmd = connection.CreateCommand())
                 {
-                    cmd.CommandText = "SELECT value FROM preferences WHERE key = 'library_root'";
+                    // preferences テーブルは key-value 形式ではなく、カラムとして item_directory_path を持つ
+                    cmd.CommandText = "SELECT item_directory_path FROM preferences LIMIT 1";
                     var result = cmd.ExecuteScalar();
-                    if (result != null) 
-                    {
-                        var path = result.ToString();
-                        Debug.Log($"[BLM Debug] Found library_root in preferences: {path}");
-                        return path;
-                    }
-                    else
-                    {
-                        Debug.LogWarning("[BLM Debug] 'library_root' key not found in preferences.");
-                    }
-
-                    cmd.CommandText = "SELECT value FROM preferences WHERE key = 'item_directory_path'";
-                    result = cmd.ExecuteScalar();
+                    
                     if (result != null)
                     {
-                        var path = result.ToString();
-                        Debug.Log($"[BLM Debug] Found item_directory_path fallback: {path}");
+                        string path = null;
+                        
+                        // BLOB型の場合はbyte[]としてデコード
+                        if (result is byte[] bytes)
+                        {
+                            path = System.Text.Encoding.UTF8.GetString(bytes);
+                            Debug.Log($"[BLM Debug] Found item_directory_path (BLOB): {path}");
+                        }
+                        else
+                        {
+                            path = result.ToString();
+                            Debug.Log($"[BLM Debug] Found item_directory_path (TEXT): {path}");
+                        }
+                        
                         return path;
                     }
                     else
                     {
-                         Debug.LogWarning("[BLM Debug] 'item_directory_path' fallback key also not found.");
+                        Debug.LogWarning("[BLM Debug] item_directory_path column is NULL or empty.");
                     }
                     
                     return null;
