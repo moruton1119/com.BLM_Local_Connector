@@ -293,31 +293,18 @@ namespace Moruton.BLMConnector
             if (detailPanel == null) return;
             selectedProduct = product;
             selectedPackagePaths.Clear();
-            detailPanel.Clear();
             detailPanel.RemoveFromClassList("detail-panel-hidden");
 
-            // ヘッダー
-            var header = new VisualElement();
-            header.style.flexDirection = FlexDirection.Row;
-            header.style.justifyContent = Justify.SpaceBetween;
-            header.style.marginBottom = 10;
+            // 既存のUIXML要素を使用（ランチャー互換性のため）
+            var nameLbl = detailPanel.Q<Label>("detail-product-name");
+            if (nameLbl != null) nameLbl.text = product.name;
 
-            var titleLabel = new Label(product.name);
-            titleLabel.style.fontSize = 16;
-            titleLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+            var pathLbl = detailPanel.Q<Label>("detail-path");
+            if (pathLbl != null) pathLbl.text = product.rootFolderPath;
 
-            var closeBtn = new Button(() => detailPanel.AddToClassList("detail-panel-hidden")) { text = "×" };
-            closeBtn.style.width = 30;
-            closeBtn.style.height = 30;
-
-            header.Add(titleLabel);
-            header.Add(closeBtn);
-            detailPanel.Add(header);
-
-            var shopLabel = new Label($"Shop: {product.shopName}");
-            shopLabel.style.color = new Color(0.7f, 0.7f, 0.7f);
-            shopLabel.style.marginBottom = 15;
-            detailPanel.Add(shopLabel);
+            var list = detailPanel.Q<ScrollView>("package-list");
+            if (list == null) return;
+            list.Clear();
 
             // アセットをタイプごとにグループ化
             var unityPackages = product.assets.Where(a => a.assetType == AssetType.UnityPackage).ToList();
@@ -329,31 +316,37 @@ namespace Moruton.BLMConnector
             // UnityPackage ゾーン
             if (unityPackages.Count > 0)
             {
-                AddAssetZone(detailPanel, "UnityPackages", unityPackages, product);
+                AddAssetZone(list, "UnityPackages", unityPackages, product);
             }
 
             // Textures ゾーン
             if (textures.Count > 0)
             {
-                AddAssetZone(detailPanel, "Textures", textures, product);
+                AddAssetZone(list, "Textures", textures, product);
             }
 
             // Models ゾーン
             if (models.Count > 0)
             {
-                AddAssetZone(detailPanel, "Models", models, product);
+                AddAssetZone(list, "Models", models, product);
             }
 
             // Audio ゾーン
             if (audio.Count > 0)
             {
-                AddAssetZone(detailPanel, "Audio", audio, product);
+                AddAssetZone(list, "Audio", audio, product);
             }
 
             // Others ゾーン
             if (others.Count > 0)
             {
-                AddAssetZone(detailPanel, "Other Files", others, product);
+                AddAssetZone(list, "Other Files", others, product);
+            }
+
+            // アセットが1つもない場合
+            if (product.assets.Count == 0)
+            {
+                list.Add(new Label("No assets found.") { style = { color = Color.gray } });
             }
         }
 
