@@ -14,7 +14,7 @@ namespace Moruton.BLMConnector
         public static List<BoothProduct> LoadLocalAssets(string libraryRoot)
         {
             var products = new List<BoothProduct>();
-            
+
             if (string.IsNullOrEmpty(libraryRoot))
             {
                 Debug.LogWarning("[BLM Standalone] Library root is null or empty. Cannot load local assets.");
@@ -22,7 +22,7 @@ namespace Moruton.BLMConnector
             }
 
             string localAssetsPath = Path.Combine(libraryRoot, "LocalAssets");
-            
+
             if (!Directory.Exists(localAssetsPath))
             {
                 Debug.Log($"[BLM Standalone] LocalAssets folder not found at: {localAssetsPath}");
@@ -42,38 +42,73 @@ namespace Moruton.BLMConnector
                         name = Path.GetFileName(folder),
                         shopName = "Local",
                         rootFolderPath = folder,
-                        sourceType = "Local"
+                        sourceType = "Local",
+                        packages = new List<BoothPackage>(),
+                        assets = new List<BoothAsset>()
                     };
 
-                    // Find ANY image file in root as thumbnail
-                    string[] imagePatterns = { "*.png", "*.jpg", "*.jpeg", "*.tga", "*.psd" };
-                    foreach (var pattern in imagePatterns)
+                    // Find ANY image file in ROOT as thumbnail (first found)
+                    string[] imageExtensions = { ".png", ".jpg", ".jpeg", ".tga", ".psd" };
+                    var rootFiles = Directory.GetFiles(folder, "*.*", SearchOption.TopDirectoryOnly);
+
+                    foreach (var file in rootFiles)
                     {
-                        var images = Directory.GetFiles(folder, pattern, SearchOption.TopDirectoryOnly);
-                        if (images.Length > 0)
+                        string ext = Path.GetExtension(file).ToLower();
+                        if (Array.Exists(imageExtensions, e => e == ext))
                         {
-                            product.thumbnailPath = images[0]; // Use first found
-                            Debug.Log($"[BLM Standalone] Found thumbnail for {product.name}: {Path.GetFileName(images[0])}");
+                            product.thumbnailPath = file;
+                            Debug.Log($"[BLM Standalone] Found thumbnail for {product.name}: {Path.GetFileName(file)}");
                             break;
                         }
                     }
 
-                    // Find all .unitypackage files in root
-                    var packages = Directory.GetFiles(folder, "*.unitypackage", SearchOption.TopDirectoryOnly);
-                    foreach (var pkg in packages)
+                    // Find ALL .unitypackage files recursively in entire folder hierarchy
+                    var allFiles = Directory.GetFiles(folder, "*.*", SearchOption.AllDirectories);
+
+                    foreach (var file in allFiles)
                     {
-                        product.packages.Add(new BoothPackage
+                        string ext = Path.GetExtension(file).ToLower();
+                        string fileName = Path.GetFileName(file);
+
+                        // Skip .blend files
+                        if (ext == ".blend") continue;
+
+                        // Add .unitypackage files
+                        if (ext == ".unitypackage")
                         {
-                            fileName = Path.GetFileName(pkg),
-                            fullPath = pkg
-                        });
+                            product.packages.Add(new BoothPackage
+                            {
+                                fileName = fileName,
+                                fullPath = file
+                            });
+
+                            product.assets.Add(new BoothAsset
+                            {
+                                fileName = fileName,
+                                fullPath = file,
+                                assetType = AssetType.UnityPackage
+                            });
+                        }
+                        // Add textures (images NOT in root folder)
+                        else if (Array.Exists(imageExtensions, e => e == ext))
+                        {
+                            // Skip if this is the thumbnail (root folder image)
+                            if (file == product.thumbnailPath) continue;
+
+                            product.assets.Add(new BoothAsset
+                            {
+                                fileName = fileName,
+                                fullPath = file,
+                                assetType = AssetType.Texture
+                            });
+                        }
                     }
 
                     // Only add if at least one .unitypackage exists
                     if (product.packages.Count > 0)
                     {
                         products.Add(product);
-                        Debug.Log($"[BLM Standalone] Loaded local asset: {product.name} ({product.packages.Count} packages)");
+                        Debug.Log($"[BLM Standalone] Loaded local asset: {product.name} ({product.packages.Count} packages, {product.assets.Count} total assets)");
                     }
                     else
                     {

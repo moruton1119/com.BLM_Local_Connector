@@ -251,11 +251,11 @@ namespace Moruton.BLMConnector
             var assets = new List<BoothAsset>();
             if (!string.IsNullOrEmpty(rootPath) && Directory.Exists(rootPath))
             {
-                // サポートする拡張子
+                // サポートする拡張子 (.blend は Unity で認識できないため除外)
                 string[] extensions = {
                     "*.unitypackage",
                     "*.png", "*.jpg", "*.jpeg", "*.tga", "*.psd",
-                    "*.fbx", "*.obj", "*.blend",
+                    "*.fbx", "*.obj",
                     "*.wav", "*.mp3", "*.ogg"
                 };
 
@@ -287,8 +287,7 @@ namespace Moruton.BLMConnector
                 case ".tga":
                 case ".psd": return AssetType.Texture;
                 case ".fbx":
-                case ".obj":
-                case ".blend": return AssetType.Model;
+                case ".obj": return AssetType.Model;
                 case ".wav":
                 case ".mp3":
                 case ".ogg": return AssetType.Audio;
