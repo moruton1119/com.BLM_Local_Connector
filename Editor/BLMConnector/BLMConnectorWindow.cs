@@ -235,37 +235,76 @@ namespace Moruton.BLMConnector
             }
         }
 
+        private void LoadThumbnail(Image img, BoothProduct product)
+        {
+            if (!string.IsNullOrEmpty(product.thumbnailPath) && File.Exists(product.thumbnailPath))
+            {
+                try
+                {
+                    var tex = new Texture2D(2, 2);
+                    tex.LoadImage(File.ReadAllBytes(product.thumbnailPath));
+                    img.image = tex;
+                    return;
+                }
+                catch { }
+            }
+
+            string cacheDir = "Library/Moruton.BLMConnector/Thumbnails";
+            if (!Directory.Exists(cacheDir)) Directory.CreateDirectory(cacheDir);
+
+            string cachePath = $"{cacheDir}/{product.id}.png";
+            if (File.Exists(cachePath))
+            {
+                img.image = AssetDatabase.LoadAssetAtPath<Texture2D>(cachePath);
+                if (img.image != null) return;
+            }
+
+            if (!string.IsNullOrEmpty(product.thumbnailUrl))
+            {
+                DownloadThumbnail(img, product.thumbnailUrl, cachePath);
+            }
+        }
+
+        private void DownloadThumbnail(Image img, string url, string savePath)
+        {
+            var request = UnityWebRequestTexture.GetTexture(url);
+            var op = request.SendWebRequest();
+            op.completed += _ =>
+            {
+                if (request == null) return;
+                try
+                {
+                    if (img != null && request.result == UnityWebRequest.Result.Success)
+                    {
+                        var tex = DownloadHandlerTexture.GetContent(request);
+                        if (tex != null)
+                        {
+                            img.image = tex;
+                            try { File.WriteAllBytes(savePath, tex.EncodeToPNG()); } catch { }
+                        }
+                    }
+                }
+                finally { request.Dispose(); }
+            };
+        }
+
         private void ShowDetail(BoothProduct product)
         {
-            // 詳細パネルを表示
-            var detailPanel = root.Q<VisualElement>("detail-panel");
             if (detailPanel == null) return;
-
-            detailPanel.Clear();
+            selectedProduct = product;
+            selectedPackagePaths.Clear();
             detailPanel.RemoveFromClassList("detail-panel-hidden");
 
-            // ヘッダー
-            var header = new VisualElement();
-            header.style.flexDirection = FlexDirection.Row;
-            header.style.justifyContent = Justify.SpaceBetween;
-            header.style.marginBottom = 10;
+            // 既存のUIXML要素を使用（ランチャー互換性のため）
+            var nameLbl = detailPanel.Q<Label>("detail-product-name");
+            if (nameLbl != null) nameLbl.text = product.name;
 
-            var titleLabel = new Label(product.name);
-            titleLabel.style.fontSize = 16;
-            titleLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+            var pathLbl = detailPanel.Q<Label>("detail-path");
+            if (pathLbl != null) pathLbl.text = product.rootFolderPath;
 
-            var closeBtn = new Button(() => detailPanel.AddToClassList("detail-panel-hidden")) { text = "×" };
-            closeBtn.style.width = 30;
-            closeBtn.style.height = 30;
-
-            header.Add(titleLabel);
-            header.Add(closeBtn);
-            detailPanel.Add(header);
-
-            var shopLabel = new Label($"Shop: {product.shopName}");
-            shopLabel.style.color = new Color(0.7f, 0.7f, 0.7f);
-            shopLabel.style.marginBottom = 15;
-            detailPanel.Add(shopLabel);
+            var list = detailPanel.Q<ScrollView>("package-list");
+            if (list == null) return;
+            list.Clear();
 
             // アセットをタイプごとにグループ化
             var unityPackages = product.assets.Where(a => a.assetType == AssetType.UnityPackage).ToList();
@@ -277,31 +316,37 @@ namespace Moruton.BLMConnector
             // UnityPackage ゾーン
             if (unityPackages.Count > 0)
             {
-                AddAssetZone(detailPanel, "UnityPackages", unityPackages, product);
+                AddAssetZone(list, "UnityPackages", unityPackages, product);
             }
 
             // Textures ゾーン
             if (textures.Count > 0)
             {
-                AddAssetZone(detailPanel, "Textures", textures, product);
+                AddAssetZone(list, "Textures", textures, product);
             }
 
             // Models ゾーン
             if (models.Count > 0)
             {
-                AddAssetZone(detailPanel, "Models", models, product);
+                AddAssetZone(list, "Models", models, product);
             }
 
             // Audio ゾーン
             if (audio.Count > 0)
             {
-                AddAssetZone(detailPanel, "Audio", audio, product);
+                AddAssetZone(list, "Audio", audio, product);
             }
 
             // Others ゾーン
             if (others.Count > 0)
             {
-                AddAssetZone(detailPanel, "Other Files", others, product);
+                AddAssetZone(list, "Other Files", others, product);
+            }
+
+            // アセットが1つもない場合
+            if (product.assets.Count == 0)
+            {
+                list.Add(new Label("No assets found.") { style = { color = Color.gray } });
             }
         }
 
@@ -372,108 +417,6 @@ namespace Moruton.BLMConnector
             foreach (var asset in assets)
             {
                 ImportAsset(asset, product);
-            }
-        }
-
-        private void LoadThumbnail(Image img, BoothProduct product)
-        {
-            if (!string.IsNullOrEmpty(product.thumbnailPath) && File.Exists(product.thumbnailPath))
-            {
-                try
-                {
-                    var tex = new Texture2D(2, 2);
-                    tex.LoadImage(File.ReadAllBytes(product.thumbnailPath));
-                    img.image = tex;
-                    return;
-                }
-                catch { }
-            }
-
-            string cacheDir = "Library/Moruton.BLMConnector/Thumbnails";
-            if (!Directory.Exists(cacheDir)) Directory.CreateDirectory(cacheDir);
-
-            string cachePath = $"{cacheDir}/{product.id}.png";
-            if (File.Exists(cachePath))
-            {
-                img.image = AssetDatabase.LoadAssetAtPath<Texture2D>(cachePath);
-                if (img.image != null) return;
-            }
-
-            if (!string.IsNullOrEmpty(product.thumbnailUrl))
-            {
-                DownloadThumbnail(img, product.thumbnailUrl, cachePath);
-            }
-        }
-
-        private void DownloadThumbnail(Image img, string url, string savePath)
-        {
-            var request = UnityWebRequestTexture.GetTexture(url);
-            var op = request.SendWebRequest();
-            op.completed += _ =>
-            {
-                if (request == null) return;
-                try
-                {
-                    if (img != null && request.result == UnityWebRequest.Result.Success)
-                    {
-                        var tex = DownloadHandlerTexture.GetContent(request);
-                        if (tex != null)
-                        {
-                            img.image = tex;
-                            try { File.WriteAllBytes(savePath, tex.EncodeToPNG()); } catch { }
-                        }
-                    }
-                }
-                finally { request.Dispose(); }
-            };
-        }
-
-        private void ShowDetail(BoothProduct product)
-        {
-            if (detailPanel == null) return;
-            selectedProduct = product;
-            selectedPackagePaths.Clear();
-            detailPanel.RemoveFromClassList("detail-panel-hidden");
-
-            var nameLbl = detailPanel.Q<Label>("detail-product-name");
-            if (nameLbl != null) nameLbl.text = product.name;
-
-            var pathLbl = detailPanel.Q<Label>("detail-path");
-            if (pathLbl != null) pathLbl.text = product.rootFolderPath;
-
-            product.packages = BLMDatabaseService.FindProductPackages(product.id, product.rootFolderPath);
-
-            var list = detailPanel.Q<ScrollView>("package-list");
-            if (list == null) return;
-            list.Clear();
-
-            if (product.packages.Count == 0)
-            {
-                list.Add(new Label("No .unitypackage files found."));
-            }
-            else
-            {
-                foreach (var pkg in product.packages)
-                {
-                    var row = new VisualElement();
-                    row.style.flexDirection = FlexDirection.Row;
-                    row.style.alignItems = Align.Center;
-                    row.AddToClassList("package-list-item");
-
-                    var toggle = new Toggle();
-                    toggle.RegisterValueChangedCallback(evt =>
-                    {
-                        if (evt.newValue) selectedPackagePaths.Add(pkg.fullPath);
-                        else selectedPackagePaths.Remove(pkg.fullPath);
-                    });
-                    row.Add(toggle);
-
-                    var label = new Label(pkg.fileName);
-                    label.style.flexGrow = 1;
-                    row.Add(label);
-
-                    list.Add(row);
-                }
             }
         }
 
