@@ -1,7 +1,6 @@
 {
     "name": "com.moruton.blm-local-connector",
     "references": [
-        "com.moruton.gimmicks",
         "VRC.SDKBase"
     ],
     "includePlatforms": [],

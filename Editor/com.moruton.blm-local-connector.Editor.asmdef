@@ -2,9 +2,7 @@
     "name": "com.moruton.blm-local-connector.Editor",
     "rootNamespace": "Moruton.BLMConnector.Editor",
     "references": [
-        "com.moruton.blm-local-connector",
-        "com.moruton.gimmicks",
-        "com.moruton.gimmicks.Editor"
+        "com.moruton.blm-local-connector"
     ],
     "includePlatforms": [
         "Editor"

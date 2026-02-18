@@ -6,6 +6,14 @@
     "packages": {
         "com.moruton.blm-local-connector": {
             "versions": {
+                "0.4.0": {
+                    "name": "com.moruton.blm-local-connector",
+                    "version": "0.4.0",
+                    "displayName": "BLM Local Connector",
+                    "description": "Morulab Launcher Hub with BLM Connector tool.",
+                    "unity": "2019.4",
+                    "url": "https://github.com/moruton1119/com.BLM_Local_Connector/releases/download/v0.4.0/com.moruton.blm-local-connector-0.4.0.zip"
+                },
                 "0.3.1": {
                     "name": "com.moruton.blm-local-connector",
                     "version": "0.3.1",
