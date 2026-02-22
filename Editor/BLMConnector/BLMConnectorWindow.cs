@@ -4,20 +4,21 @@ using System.Linq;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
+using UnityEditor.UIElements;
 using System.IO;
 using UnityEngine.Networking;
-// using MorulabTools.Launcher;
+using MorulabTools.Launcher;
 
 namespace Moruton.BLMConnector
 {
     public class BLMConnectorWindow : EditorWindow
     {
-        [MenuItem("Morulab/BLM Connector (Standalone)")]
-        // [MorulabTools.Launcher.MenuDescription("Booth Library Manager Connector (Standalone). Manage and import assets from your local library.", "Import & Export")]
-        // [MorulabTools.Launcher.ToolLocalize("en", "BLM Connector (Standalone)", "Manage and import assets from your local library.", "Import & Export")]
-        // [MorulabTools.Launcher.ToolLocalize("ja", "BLM Connector (単独版)", "ローカルのBOOTHライブラリを管理し、アセットを一括インポートします。", "インポート・エクスポート")]
-        // [MorulabTools.Launcher.ToolLocalize("ko", "BLM Connector (Standalone)", "로컬 BOOTH 라이브러리를 관리하고 에셋을 일괄 가져오기 합니다.", "가져오기 및 내보내기")]
-        public static void ShowWindow()
+    [MenuItem("Morulab/BLM Connector (Standalone)")]
+    [MenuDescription("Booth Library Manager Connector (Standalone). Manage and import assets from your local library.", "Import & Export")]
+    [ToolLocalize("en", "BLM Connector (Standalone)", "Manage and import assets from your local library.", "Import & Export")]
+    [ToolLocalize("ja", "BLM Connector (単独版)", "ローカルのBOOTHライブラリを管理し、アセットを一括インポートします。", "インポート・エクスポート")]
+    [ToolLocalize("ko", "BLM Connector (Standalone)", "로컬 BOOTH 라이브러리를 관리하고 에셋을 일괄 가져오기 합니다.", "가져오기 및 내보내기")]
+    public static void ShowWindow()
         {
             var window = GetWindow<BLMConnectorWindow>();
             window.titleContent = new GUIContent("BLM Connector (Std)");
@@ -51,10 +52,17 @@ namespace Moruton.BLMConnector
     {
         private VisualElement root;
         private VisualElement gridContainer;
+        private VisualElement detailOverlay;
         private VisualElement detailPanel;
         private List<BoothProduct> allProducts = new List<BoothProduct>();
         private BoothProduct selectedProduct;
         private List<string> selectedPackagePaths = new List<string>();
+        private HashSet<string> importedProductIds = new HashSet<string>();
+
+        private List<BoothList> availableLists = new List<BoothList>();
+        private PopupField<string> filterDropdown;
+        private FilterType currentFilterType = FilterType.AllProducts;
+        private int currentListId = -1;
 
         public VisualElement CreateUI()
         {
@@ -72,7 +80,21 @@ namespace Moruton.BLMConnector
             root.style.height = Length.Percent(100);
 
             gridContainer = root.Q<VisualElement>("grid-container");
+            detailOverlay = root.Q<VisualElement>("detail-overlay");
             detailPanel = root.Q<VisualElement>("detail-panel");
+
+            // 背景クリックでモーダルを閉じる
+            if (detailOverlay != null)
+            {
+                detailOverlay.RegisterCallback<ClickEvent>(evt =>
+                {
+                    if (evt.target == detailOverlay)
+                    {
+                        HideDetail();
+                        evt.StopPropagation();
+                    }
+                });
+            }
 
             BindButton("refresh-db", RefreshData);
             BindButton("close-detail", HideDetail);
@@ -82,6 +104,7 @@ namespace Moruton.BLMConnector
             BindButton("view-queue", ShowQueueList);
             BindButton("reset-queue", () => { AssetImportQueue.ClearQueue(); UpdateQueueStatus(); });
             BindButton("close-queue-list", () => root.Q<VisualElement>("queue-list-panel")?.AddToClassList("detail-panel-hidden"));
+            BindButton("open-local-assets", OpenLocalAssetsFolder);
 
             var hamburger = root.Q<Button>("hamburger-menu");
             var sidebar = root.Q<VisualElement>("sidebar");
@@ -97,10 +120,81 @@ namespace Moruton.BLMConnector
                 toggle.RegisterValueChangedCallback(evt => AssetImportQueue.InteractiveMode = evt.newValue);
             }
 
+            SetupFilterDropdown();
+
             root.RegisterCallback<AttachToPanelEvent>(OnAttach);
             root.RegisterCallback<DetachFromPanelEvent>(OnDetach);
 
             return root;
+        }
+
+        private void SetupFilterDropdown()
+        {
+            var container = root.Q<VisualElement>("filter-dropdown-container");
+            if (container == null) return;
+
+            var choices = new List<string> { "All Products", "BLM Products", "Local Products" };
+            filterDropdown = new PopupField<string>(choices, 0);
+            filterDropdown.style.width = Length.Percent(100);
+            filterDropdown.RegisterValueChangedCallback(evt => OnFilterChanged(evt.newValue));
+            container.Add(filterDropdown);
+        }
+
+        private void OnFilterChanged(string selectedValue)
+        {
+            if (selectedValue == "All Products")
+            {
+                currentFilterType = FilterType.AllProducts;
+                currentListId = -1;
+            }
+            else if (selectedValue == "BLM Products")
+            {
+                currentFilterType = FilterType.BLMProducts;
+                currentListId = -1;
+            }
+            else if (selectedValue == "Local Products")
+            {
+                currentFilterType = FilterType.LocalProducts;
+                currentListId = -1;
+            }
+            else if (selectedValue.StartsWith("📋 "))
+            {
+                currentFilterType = FilterType.CustomList;
+                var listTitle = selectedValue.Substring(2);
+                var list = availableLists.FirstOrDefault(l => l.title == listTitle);
+                if (list != null)
+                {
+                    currentListId = list.id;
+                    UpdateListFilterCache();
+                }
+            }
+
+            ApplyFilters();
+        }
+
+        private void UpdateFilterDropdownChoices()
+        {
+            if (filterDropdown == null) return;
+
+            var choices = new List<string> { "All Products", "BLM Products", "Local Products" };
+            foreach (var list in availableLists)
+            {
+                choices.Add($"📋 {list.title}");
+            }
+
+            var currentValue = filterDropdown.value;
+            filterDropdown.choices = choices;
+
+            if (choices.Contains(currentValue))
+            {
+                filterDropdown.value = currentValue;
+            }
+            else
+            {
+                filterDropdown.index = 0;
+                currentFilterType = FilterType.AllProducts;
+                currentListId = -1;
+            }
         }
 
         private void BindButton(string name, Action action)
@@ -158,10 +252,118 @@ namespace Moruton.BLMConnector
 
         private void RefreshData()
         {
+            importedProductIds.Clear();
             BLMHistory.Refresh();
+
             string dbPath = BLMDatabaseService.GetDefaultDbPath();
-            allProducts = BLMDatabaseService.LoadProducts(dbPath);
-            RebuildGrid(allProducts);
+
+            availableLists = BLMDatabaseService.LoadLists(dbPath);
+            UpdateFilterDropdownChoices();
+
+            var blmProducts = BLMDatabaseService.LoadProducts(dbPath);
+
+            var localProducts = new List<BoothProduct>();
+            if (!string.IsNullOrEmpty(BLMDatabaseService.LibraryRoot))
+            {
+                EnsureLocalAssetsFolderExists();
+                localProducts = LocalAssetService.LoadLocalAssets(BLMDatabaseService.LibraryRoot);
+            }
+
+            allProducts = new List<BoothProduct>();
+            allProducts.AddRange(blmProducts);
+            allProducts.AddRange(localProducts);
+
+            Debug.Log($"[BLM Standalone] Loaded {blmProducts.Count} BLM products + {localProducts.Count} local products = {allProducts.Count} total");
+
+            ApplyFilters();
+        }
+
+        private void EnsureLocalAssetsFolderExists()
+        {
+            if (string.IsNullOrEmpty(BLMDatabaseService.LibraryRoot)) return;
+
+            string localAssetsPath = Path.Combine(BLMDatabaseService.LibraryRoot, "LocalAssets");
+            if (!Directory.Exists(localAssetsPath))
+            {
+                try
+                {
+                    Directory.CreateDirectory(localAssetsPath);
+                    Debug.Log($"[BLM Standalone] Created LocalAssets folder at: {localAssetsPath}");
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"[BLM Standalone] Failed to create LocalAssets folder: {ex.Message}");
+                }
+            }
+        }
+
+        private void OpenLocalAssetsFolder()
+        {
+            if (string.IsNullOrEmpty(BLMDatabaseService.LibraryRoot))
+            {
+                EditorUtility.DisplayDialog("Error", "BLM Library Root not found. Please ensure BOOTH Library Manager is configured.", "OK");
+                return;
+            }
+
+            string localAssetsPath = Path.Combine(BLMDatabaseService.LibraryRoot, "LocalAssets");
+
+            // Create folder if it doesn't exist
+            if (!Directory.Exists(localAssetsPath))
+            {
+                try
+                {
+                    Directory.CreateDirectory(localAssetsPath);
+                    Debug.Log($"[BLM Standalone] Created LocalAssets folder at: {localAssetsPath}");
+                }
+                catch (Exception ex)
+                {
+                    EditorUtility.DisplayDialog("Error", $"Failed to create LocalAssets folder: {ex.Message}", "OK");
+                    return;
+                }
+            }
+
+            // Open in file explorer
+            EditorUtility.RevealInFinder(localAssetsPath);
+            Debug.Log($"[BLM Standalone] Opened LocalAssets folder: {localAssetsPath}");
+        }
+
+        private void ApplyFilters()
+        {
+            var filtered = allProducts.Where(p =>
+            {
+                switch (currentFilterType)
+                {
+                    case FilterType.AllProducts:
+                        return true;
+                    case FilterType.BLMProducts:
+                        return p.sourceType == "BLM";
+                    case FilterType.LocalProducts:
+                        return p.sourceType == "Local";
+                    case FilterType.CustomList:
+                        if (currentListId < 0) return true;
+                        if (p.sourceType != "BLM") return false;
+                        if (!int.TryParse(p.id, out int boothId)) return false;
+                        return listFilterCache.Contains(boothId);
+                    default:
+                        return true;
+                }
+            }).ToList();
+
+            Debug.Log($"[BLM Standalone] Filtered: {filtered.Count}/{allProducts.Count} products (Filter: {currentFilterType})");
+
+            RebuildGrid(filtered);
+        }
+
+        private HashSet<int> listFilterCache = new HashSet<int>();
+
+        private void UpdateListFilterCache()
+        {
+            listFilterCache.Clear();
+            if (currentFilterType == FilterType.CustomList && currentListId >= 0)
+            {
+                string dbPath = BLMDatabaseService.GetDefaultDbPath();
+                listFilterCache = BLMDatabaseService.LoadListItemBoothIds(dbPath, currentListId);
+            }
         }
 
         private void RebuildGrid(List<BoothProduct> products)
@@ -202,6 +404,11 @@ namespace Moruton.BLMConnector
                 {
                     item.AddToClassList("installed");
                 }
+                
+                if (importedProductIds.Contains(product.id))
+                {
+                    item.AddToClassList("batch-imported");
+                }
 
                 gridContainer.Add(item);
             }
@@ -228,9 +435,21 @@ namespace Moruton.BLMConnector
                 if (product.packages != null && product.packages.Count > 0)
                 {
                     var paths = product.packages.Select(p => p.fullPath).ToList();
+                    
+                    if (paths.Count >= 2)
+                    {
+                        bool ok = EditorUtility.DisplayDialog(
+                            "Batch Import",
+                            $"Importing {paths.Count} packages.\n\nSkip All (Import Dialog) will be automatically enabled.\n\nContinue?",
+                            "OK", "Cancel");
+                        if (!ok) return;
+                        AssetImportQueue.InteractiveMode = false;
+                    }
+                    
+                    importedProductIds.Add(product.id);
                     AssetImportQueue.EnqueueMultiple(paths, product.id);
                     UpdateQueueStatus();
-                    RefreshData();
+                    ApplyFilters();
                 }
             }
         }
@@ -290,54 +509,139 @@ namespace Moruton.BLMConnector
 
         private void ShowDetail(BoothProduct product)
         {
-            if (detailPanel == null) return;
+            if (detailOverlay == null) return;
             selectedProduct = product;
             selectedPackagePaths.Clear();
-            detailPanel.RemoveFromClassList("detail-panel-hidden");
+            detailOverlay.RemoveFromClassList("detail-panel-hidden");
 
+            // 既存のUIXML要素を使用（ランチャー互換性のため）
             var nameLbl = detailPanel.Q<Label>("detail-product-name");
             if (nameLbl != null) nameLbl.text = product.name;
 
             var pathLbl = detailPanel.Q<Label>("detail-path");
             if (pathLbl != null) pathLbl.text = product.rootFolderPath;
 
-            product.packages = BLMDatabaseService.FindProductPackages(product.id, product.rootFolderPath);
-
             var list = detailPanel.Q<ScrollView>("package-list");
             if (list == null) return;
             list.Clear();
 
-            if (product.packages.Count == 0)
+            // アセットをタイプごとにグループ化
+            var unityPackages = product.assets.Where(a => a.assetType == AssetType.UnityPackage).ToList();
+            var textures = product.assets.Where(a => a.assetType == AssetType.Texture).ToList();
+            var models = product.assets.Where(a => a.assetType == AssetType.Model).ToList();
+            var audio = product.assets.Where(a => a.assetType == AssetType.Audio).ToList();
+            var others = product.assets.Where(a => a.assetType == AssetType.Other).ToList();
+
+            // UnityPackage ゾーン
+            if (unityPackages.Count > 0)
             {
-                list.Add(new Label("No .unitypackage files found."));
+                AddAssetZone(list, "UnityPackages", unityPackages, product);
             }
-            else
+
+            // Textures ゾーン
+            if (textures.Count > 0)
             {
-                foreach (var pkg in product.packages)
-                {
-                    var row = new VisualElement();
-                    row.style.flexDirection = FlexDirection.Row;
-                    row.style.alignItems = Align.Center;
-                    row.AddToClassList("package-list-item");
+                AddAssetZone(list, "Textures", textures, product);
+            }
 
-                    var toggle = new Toggle();
-                    toggle.RegisterValueChangedCallback(evt =>
-                    {
-                        if (evt.newValue) selectedPackagePaths.Add(pkg.fullPath);
-                        else selectedPackagePaths.Remove(pkg.fullPath);
-                    });
-                    row.Add(toggle);
+            // Models ゾーン
+            if (models.Count > 0)
+            {
+                AddAssetZone(list, "Models", models, product);
+            }
 
-                    var label = new Label(pkg.fileName);
-                    label.style.flexGrow = 1;
-                    row.Add(label);
+            // Audio ゾーン
+            if (audio.Count > 0)
+            {
+                AddAssetZone(list, "Audio", audio, product);
+            }
 
-                    list.Add(row);
-                }
+            // Others ゾーン
+            if (others.Count > 0)
+            {
+                AddAssetZone(list, "Other Files", others, product);
+            }
+
+            // アセットが1つもない場合
+            if (product.assets.Count == 0)
+            {
+                list.Add(new Label("No assets found.") { style = { color = Color.gray } });
             }
         }
 
-        private void HideDetail() => detailPanel?.AddToClassList("detail-panel-hidden");
+        private void AddAssetZone(VisualElement parent, string zoneName, List<BoothAsset> assets, BoothProduct product)
+        {
+            var zone = new VisualElement();
+            zone.style.marginBottom = 15;
+            zone.style.paddingBottom = 10;
+            zone.style.paddingTop = 10;
+            zone.style.paddingLeft = 10;
+            zone.style.paddingRight = 10;
+            zone.style.backgroundColor = new Color(0.2f, 0.2f, 0.2f, 0.3f);
+            zone.style.borderBottomLeftRadius = 5;
+            zone.style.borderBottomRightRadius = 5;
+            zone.style.borderTopLeftRadius = 5;
+            zone.style.borderTopRightRadius = 5;
+
+            var zoneHeader = new Label($"─ {zoneName} ({assets.Count}) ─");
+            zoneHeader.style.unityFontStyleAndWeight = FontStyle.Bold;
+            zoneHeader.style.marginBottom = 8;
+            zone.Add(zoneHeader);
+
+            foreach (var asset in assets)
+            {
+                var assetRow = new VisualElement();
+                assetRow.style.flexDirection = FlexDirection.Row;
+                assetRow.style.justifyContent = Justify.SpaceBetween;
+                assetRow.style.marginBottom = 5;
+                assetRow.style.paddingLeft = 10;
+
+                var assetLabel = new Label($"○ {asset.fileName}");
+                assetLabel.style.flexGrow = 1;
+
+                var importBtn = new Button(() => ImportAsset(asset, product)) { text = "Import" };
+                importBtn.style.width = 80;
+
+                assetRow.Add(assetLabel);
+                assetRow.Add(importBtn);
+                zone.Add(assetRow);
+            }
+
+            // Import All ボタン
+            if (assets.Count > 1)
+            {
+                var importAllBtn = new Button(() => ImportAllAssets(assets, product)) { text = $"Import All {zoneName}" };
+                importAllBtn.style.marginTop = 8;
+                zone.Add(importAllBtn);
+            }
+
+            parent.Add(zone);
+        }
+
+        private void ImportAsset(BoothAsset asset, BoothProduct product)
+        {
+            try
+            {
+                BLMAssetImporter.ImportAsset(asset, product.name);
+                importedProductIds.Add(product.id);
+                Debug.Log($"[BLM] Successfully imported {asset.fileName}");
+                ApplyFilters();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[BLM] Failed to import {asset.fileName}: {ex.Message}");
+            }
+        }
+
+        private void ImportAllAssets(List<BoothAsset> assets, BoothProduct product)
+        {
+            foreach (var asset in assets)
+            {
+                ImportAsset(asset, product);
+            }
+        }
+
+        private void HideDetail() => detailOverlay?.AddToClassList("detail-panel-hidden");
 
         private void AddSelectedToQueue()
         {
@@ -351,7 +655,7 @@ namespace Moruton.BLMConnector
         private T LoadAsset<T>(string fileName) where T : UnityEngine.Object
         {
             string[] paths = {
-                $"Packages/com.moruton.blm-local-connector/Editor/BLMConnector/{fileName}"
+                $"Packages/com.morulab.unity-tools/Editor/BLMConnector/{fileName}"
             };
             foreach (var path in paths)
             {

@@ -80,10 +80,12 @@ namespace Moruton.BLMConnector
                                     name = reader["name"].ToString(),
                                     shopName = reader["shop_name"] != DBNull.Value ? reader["shop_name"].ToString() : "Unknown",
                                     shopSubdomain = reader["shop_subdomain"] != DBNull.Value ? reader["shop_subdomain"].ToString() : "",
-                                    thumbnailUrl = reader["thumbnail_url"] != DBNull.Value ? reader["thumbnail_url"].ToString() : ""
+                                    thumbnailUrl = reader["thumbnail_url"] != DBNull.Value ? reader["thumbnail_url"].ToString() : "",
+                                    sourceType = "BLM"
                                 };
                                 
-                                string productPath = Path.Combine(currentLibraryRoot, p.shopSubdomain, p.id);
+                                // BLMのフォルダ構造: {libraryRoot}\b{id}
+                                string productPath = Path.Combine(currentLibraryRoot, $"b{p.id}");
 
                                 if (!Directory.Exists(productPath))
                                 {
@@ -99,6 +101,9 @@ namespace Moruton.BLMConnector
                                 string jpg = Path.Combine(cacheDir, $"{p.id}.jpg");
                                 if (File.Exists(png)) p.thumbnailPath = png;
                                 else if (File.Exists(jpg)) p.thumbnailPath = jpg;
+
+                                // アセットを読み込む
+                                p.assets = FindProductAssets(p.id, productPath);
 
                                 products.Add(p);
                             }
@@ -122,16 +127,52 @@ namespace Moruton.BLMConnector
             {
                 using (var cmd = connection.CreateCommand())
                 {
-                    cmd.CommandText = "SELECT value FROM preferences WHERE key = 'library_root'";
+                    // preferences テーブルは key-value 形式ではなく、カラムとして item_directory_path を持つ
+                    cmd.CommandText = "SELECT item_directory_path FROM preferences LIMIT 1";
                     var result = cmd.ExecuteScalar();
-                    if (result != null) return result.ToString();
-
-                    cmd.CommandText = "SELECT value FROM preferences WHERE key = 'item_directory_path'";
-                    result = cmd.ExecuteScalar();
-                    return result?.ToString();
+                    
+                    if (result != null)
+                    {
+                        string path = null;
+                        
+                        // BLOB型の場合はbyte[]としてデコード
+                        if (result is byte[] bytes)
+                        {
+                            Debug.Log($"[BLM Debug] BLOB byte length: {bytes.Length}");
+                            Debug.Log($"[BLM Debug] BLOB hex: {BitConverter.ToString(bytes)}");
+                            
+                            // UTF-16 LE (Little Endian) でデコード - BLMはこの形式を使用
+                            path = System.Text.Encoding.Unicode.GetString(bytes);
+                            Debug.Log($"[BLM Debug] UTF-16 decoded: {path}");
+                            
+                            // もしUTF-16で正しく取得できない場合、UTF-8を試す
+                            if (string.IsNullOrEmpty(path) || path.Length < 3)
+                            {
+                                path = System.Text.Encoding.UTF8.GetString(bytes);
+                                Debug.Log($"[BLM Debug] UTF-8 decoded: {path}");
+                            }
+                        }
+                        else
+                        {
+                            path = result.ToString();
+                            Debug.Log($"[BLM Debug] Found item_directory_path (TEXT): {path}");
+                        }
+                        
+                        return path;
+                    }
+                    else
+                    {
+                        Debug.LogWarning("[BLM Debug] item_directory_path column is NULL or empty.");
+                    }
+                    
+                    return null;
                 }
             }
-            catch { return null; }
+            catch (Exception ex)
+            { 
+                Debug.LogError($"[BLM Debug] Error reading preferences: {ex.Message}");
+                return null; 
+            }
         }
 #endif
 
@@ -185,7 +226,7 @@ namespace Moruton.BLMConnector
         private static bool IsMatch(string path, string id, List<string> keywords, string shop)
         {
             string name = Path.GetFileName(path);
-            if (name.Contains(id)) return true; 
+            if (name.Contains(id)) return true;
             if (!string.IsNullOrEmpty(shop) && name.IndexOf(shop, StringComparison.OrdinalIgnoreCase) >= 0) return true;
             foreach (var kw in keywords) if (name.IndexOf(kw, StringComparison.OrdinalIgnoreCase) >= 0) return true;
             return false;
@@ -203,6 +244,144 @@ namespace Moruton.BLMConnector
                 }
             }
             return packages;
+        }
+
+        public static List<BoothAsset> FindProductAssets(string productId, string rootPath)
+        {
+            var assets = new List<BoothAsset>();
+            if (!string.IsNullOrEmpty(rootPath) && Directory.Exists(rootPath))
+            {
+                // サポートする拡張子 (.blend は Unity で認識できないため除外)
+                string[] extensions = {
+                    "*.unitypackage",
+                    "*.png", "*.jpg", "*.jpeg", "*.tga", "*.psd",
+                    "*.fbx", "*.obj",
+                    "*.wav", "*.mp3", "*.ogg"
+                };
+
+                foreach (var ext in extensions)
+                {
+                    var files = Directory.GetFiles(rootPath, ext, SearchOption.AllDirectories);
+                    foreach (var file in files)
+                    {
+                        assets.Add(new BoothAsset
+                        {
+                            fileName = Path.GetFileName(file),
+                            fullPath = file,
+                            assetType = GetAssetType(Path.GetExtension(file))
+                        });
+                    }
+                }
+            }
+            return assets;
+        }
+
+        private static AssetType GetAssetType(string extension)
+        {
+            switch (extension.ToLower())
+            {
+                case ".unitypackage": return AssetType.UnityPackage;
+                case ".png":
+                case ".jpg":
+                case ".jpeg":
+                case ".tga":
+                case ".psd": return AssetType.Texture;
+                case ".fbx":
+                case ".obj": return AssetType.Model;
+                case ".wav":
+                case ".mp3":
+                case ".ogg": return AssetType.Audio;
+                default: return AssetType.Other;
+            }
+        }
+
+        public static List<BoothList> LoadLists(string dbPath)
+        {
+            var lists = new List<BoothList>();
+            if (!File.Exists(dbPath))
+            {
+                Debug.LogError($"[BLM Standalone] Database file not found at: {dbPath}");
+                return lists;
+            }
+
+#if BLM_LOCAL_CONNECTOR_HAS_SQLITE
+            try
+            {
+                string connectionString = $"URI=file:{dbPath};ReadOnly=True";
+                using (var connection = new SqliteConnection(connectionString))
+                {
+                    connection.Open();
+                    using (var cmd = connection.CreateCommand())
+                    {
+                        cmd.CommandText = "SELECT id, title, description, created_at, updated_at FROM lists ORDER BY title";
+                        using (var reader = cmd.ExecuteReader())
+                        {
+                            while (reader.Read())
+                            {
+                                lists.Add(new BoothList
+                                {
+                                    id = Convert.ToInt32(reader["id"]),
+                                    title = reader["title"].ToString(),
+                                    description = reader["description"] != DBNull.Value ? reader["description"].ToString() : "",
+                                    createdAt = reader["created_at"].ToString(),
+                                    updatedAt = reader["updated_at"].ToString()
+                                });
+                            }
+                        }
+                    }
+                }
+                Debug.Log($"[BLM Standalone] Loaded {lists.Count} lists.");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[BLM Standalone] Error loading lists: {ex.Message}");
+            }
+#endif
+            return lists;
+        }
+
+        public static HashSet<int> LoadListItemBoothIds(string dbPath, int listId)
+        {
+            var boothIds = new HashSet<int>();
+            if (!File.Exists(dbPath)) return boothIds;
+
+#if BLM_LOCAL_CONNECTOR_HAS_SQLITE
+            try
+            {
+                string connectionString = $"URI=file:{dbPath};ReadOnly=True";
+                using (var connection = new SqliteConnection(connectionString))
+                {
+                    connection.Open();
+                    using (var cmd = connection.CreateCommand())
+                    {
+                        cmd.CommandText = @"
+                            SELECT ri.booth_item_id 
+                            FROM list_items li
+                            INNER JOIN registered_items ri ON li.item_id = ri.id
+                            WHERE li.list_id = @listId";
+                        
+                        var param = cmd.CreateParameter();
+                        param.ParameterName = "@listId";
+                        param.Value = listId;
+                        cmd.Parameters.Add(param);
+
+                        using (var reader = cmd.ExecuteReader())
+                        {
+                            while (reader.Read())
+                            {
+                                boothIds.Add(Convert.ToInt32(reader["booth_item_id"]));
+                            }
+                        }
+                    }
+                }
+                Debug.Log($"[BLM Standalone] Loaded {boothIds.Count} items for list {listId}");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[BLM Standalone] Error loading list items: {ex.Message}");
+            }
+#endif
+            return boothIds;
         }
     }
 }
