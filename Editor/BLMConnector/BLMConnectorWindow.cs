@@ -4,6 +4,7 @@ using System.Linq;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
+using UnityEditor.UIElements;
 using System.IO;
 using UnityEngine.Networking;
 using MorulabTools.Launcher;
@@ -56,9 +57,12 @@ namespace Moruton.BLMConnector
         private List<BoothProduct> allProducts = new List<BoothProduct>();
         private BoothProduct selectedProduct;
         private List<string> selectedPackagePaths = new List<string>();
-        private Toggle filterBLMToggle;
-        private Toggle filterOthersToggle;
         private HashSet<string> importedProductIds = new HashSet<string>();
+
+        private List<BoothList> availableLists = new List<BoothList>();
+        private PopupField<string> filterDropdown;
+        private FilterType currentFilterType = FilterType.AllProducts;
+        private int currentListId = -1;
 
         public VisualElement CreateUI()
         {
@@ -116,22 +120,81 @@ namespace Moruton.BLMConnector
                 toggle.RegisterValueChangedCallback(evt => AssetImportQueue.InteractiveMode = evt.newValue);
             }
 
-            // Setup filter toggles
-            filterBLMToggle = root.Q<Toggle>("filter-blm");
-            filterOthersToggle = root.Q<Toggle>("filter-others");
-            if (filterBLMToggle != null)
-            {
-                filterBLMToggle.RegisterValueChangedCallback(evt => ApplyFilters());
-            }
-            if (filterOthersToggle != null)
-            {
-                filterOthersToggle.RegisterValueChangedCallback(evt => ApplyFilters());
-            }
+            SetupFilterDropdown();
 
             root.RegisterCallback<AttachToPanelEvent>(OnAttach);
             root.RegisterCallback<DetachFromPanelEvent>(OnDetach);
 
             return root;
+        }
+
+        private void SetupFilterDropdown()
+        {
+            var container = root.Q<VisualElement>("filter-dropdown-container");
+            if (container == null) return;
+
+            var choices = new List<string> { "All Products", "BLM Products", "Local Products" };
+            filterDropdown = new PopupField<string>(choices, 0);
+            filterDropdown.style.width = Length.Percent(100);
+            filterDropdown.RegisterValueChangedCallback(evt => OnFilterChanged(evt.newValue));
+            container.Add(filterDropdown);
+        }
+
+        private void OnFilterChanged(string selectedValue)
+        {
+            if (selectedValue == "All Products")
+            {
+                currentFilterType = FilterType.AllProducts;
+                currentListId = -1;
+            }
+            else if (selectedValue == "BLM Products")
+            {
+                currentFilterType = FilterType.BLMProducts;
+                currentListId = -1;
+            }
+            else if (selectedValue == "Local Products")
+            {
+                currentFilterType = FilterType.LocalProducts;
+                currentListId = -1;
+            }
+            else if (selectedValue.StartsWith("📋 "))
+            {
+                currentFilterType = FilterType.CustomList;
+                var listTitle = selectedValue.Substring(2);
+                var list = availableLists.FirstOrDefault(l => l.title == listTitle);
+                if (list != null)
+                {
+                    currentListId = list.id;
+                    UpdateListFilterCache();
+                }
+            }
+
+            ApplyFilters();
+        }
+
+        private void UpdateFilterDropdownChoices()
+        {
+            if (filterDropdown == null) return;
+
+            var choices = new List<string> { "All Products", "BLM Products", "Local Products" };
+            foreach (var list in availableLists)
+            {
+                choices.Add($"📋 {list.title}");
+            }
+
+            var currentValue = filterDropdown.value;
+            filterDropdown.choices = choices;
+
+            if (choices.Contains(currentValue))
+            {
+                filterDropdown.value = currentValue;
+            }
+            else
+            {
+                filterDropdown.index = 0;
+                currentFilterType = FilterType.AllProducts;
+                currentListId = -1;
+            }
         }
 
         private void BindButton(string name, Action action)
@@ -192,20 +255,20 @@ namespace Moruton.BLMConnector
             importedProductIds.Clear();
             BLMHistory.Refresh();
 
-            // Load BLM products from database
             string dbPath = BLMDatabaseService.GetDefaultDbPath();
+
+            availableLists = BLMDatabaseService.LoadLists(dbPath);
+            UpdateFilterDropdownChoices();
+
             var blmProducts = BLMDatabaseService.LoadProducts(dbPath);
 
-            // Load Local products from LocalAssets folder
             var localProducts = new List<BoothProduct>();
             if (!string.IsNullOrEmpty(BLMDatabaseService.LibraryRoot))
             {
-                // Auto-create LocalAssets folder if it doesn't exist
                 EnsureLocalAssetsFolderExists();
                 localProducts = LocalAssetService.LoadLocalAssets(BLMDatabaseService.LibraryRoot);
             }
 
-            // Merge both sources
             allProducts = new List<BoothProduct>();
             allProducts.AddRange(blmProducts);
             allProducts.AddRange(localProducts);
@@ -266,19 +329,41 @@ namespace Moruton.BLMConnector
 
         private void ApplyFilters()
         {
-            bool showBLM = filterBLMToggle?.value ?? true;
-            bool showOthers = filterOthersToggle?.value ?? true;
-
             var filtered = allProducts.Where(p =>
             {
-                if (p.sourceType == "BLM" && !showBLM) return false;
-                if (p.sourceType == "Local" && !showOthers) return false;
-                return true;
+                switch (currentFilterType)
+                {
+                    case FilterType.AllProducts:
+                        return true;
+                    case FilterType.BLMProducts:
+                        return p.sourceType == "BLM";
+                    case FilterType.LocalProducts:
+                        return p.sourceType == "Local";
+                    case FilterType.CustomList:
+                        if (currentListId < 0) return true;
+                        if (p.sourceType != "BLM") return false;
+                        if (!int.TryParse(p.id, out int boothId)) return false;
+                        return listFilterCache.Contains(boothId);
+                    default:
+                        return true;
+                }
             }).ToList();
 
-            Debug.Log($"[BLM Standalone] Filtered: {filtered.Count}/{allProducts.Count} products (BLM: {showBLM}, Others: {showOthers})");
+            Debug.Log($"[BLM Standalone] Filtered: {filtered.Count}/{allProducts.Count} products (Filter: {currentFilterType})");
 
             RebuildGrid(filtered);
+        }
+
+        private HashSet<int> listFilterCache = new HashSet<int>();
+
+        private void UpdateListFilterCache()
+        {
+            listFilterCache.Clear();
+            if (currentFilterType == FilterType.CustomList && currentListId >= 0)
+            {
+                string dbPath = BLMDatabaseService.GetDefaultDbPath();
+                listFilterCache = BLMDatabaseService.LoadListItemBoothIds(dbPath, currentListId);
+            }
         }
 
         private void RebuildGrid(List<BoothProduct> products)
@@ -364,11 +449,7 @@ namespace Moruton.BLMConnector
                     importedProductIds.Add(product.id);
                     AssetImportQueue.EnqueueMultiple(paths, product.id);
                     UpdateQueueStatus();
-                    RebuildGrid(allProducts.Where(p => {
-                        if (p.sourceType == "BLM" && !(filterBLMToggle?.value ?? true)) return false;
-                        if (p.sourceType == "Local" && !(filterOthersToggle?.value ?? true)) return false;
-                        return true;
-                    }).ToList());
+                    ApplyFilters();
                 }
             }
         }
@@ -544,11 +625,7 @@ namespace Moruton.BLMConnector
                 BLMAssetImporter.ImportAsset(asset, product.name);
                 importedProductIds.Add(product.id);
                 Debug.Log($"[BLM] Successfully imported {asset.fileName}");
-                RebuildGrid(allProducts.Where(p => {
-                    if (p.sourceType == "BLM" && !(filterBLMToggle?.value ?? true)) return false;
-                    if (p.sourceType == "Local" && !(filterOthersToggle?.value ?? true)) return false;
-                    return true;
-                }).ToList());
+                ApplyFilters();
             }
             catch (Exception ex)
             {

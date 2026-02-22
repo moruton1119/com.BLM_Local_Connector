@@ -294,5 +294,94 @@ namespace Moruton.BLMConnector
                 default: return AssetType.Other;
             }
         }
+
+        public static List<BoothList> LoadLists(string dbPath)
+        {
+            var lists = new List<BoothList>();
+            if (!File.Exists(dbPath))
+            {
+                Debug.LogError($"[BLM Standalone] Database file not found at: {dbPath}");
+                return lists;
+            }
+
+#if BLM_LOCAL_CONNECTOR_HAS_SQLITE
+            try
+            {
+                string connectionString = $"URI=file:{dbPath};ReadOnly=True";
+                using (var connection = new SqliteConnection(connectionString))
+                {
+                    connection.Open();
+                    using (var cmd = connection.CreateCommand())
+                    {
+                        cmd.CommandText = "SELECT id, title, description, created_at, updated_at FROM lists ORDER BY title";
+                        using (var reader = cmd.ExecuteReader())
+                        {
+                            while (reader.Read())
+                            {
+                                lists.Add(new BoothList
+                                {
+                                    id = Convert.ToInt32(reader["id"]),
+                                    title = reader["title"].ToString(),
+                                    description = reader["description"] != DBNull.Value ? reader["description"].ToString() : "",
+                                    createdAt = reader["created_at"].ToString(),
+                                    updatedAt = reader["updated_at"].ToString()
+                                });
+                            }
+                        }
+                    }
+                }
+                Debug.Log($"[BLM Standalone] Loaded {lists.Count} lists.");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[BLM Standalone] Error loading lists: {ex.Message}");
+            }
+#endif
+            return lists;
+        }
+
+        public static HashSet<int> LoadListItemBoothIds(string dbPath, int listId)
+        {
+            var boothIds = new HashSet<int>();
+            if (!File.Exists(dbPath)) return boothIds;
+
+#if BLM_LOCAL_CONNECTOR_HAS_SQLITE
+            try
+            {
+                string connectionString = $"URI=file:{dbPath};ReadOnly=True";
+                using (var connection = new SqliteConnection(connectionString))
+                {
+                    connection.Open();
+                    using (var cmd = connection.CreateCommand())
+                    {
+                        cmd.CommandText = @"
+                            SELECT ri.booth_item_id 
+                            FROM list_items li
+                            INNER JOIN registered_items ri ON li.item_id = ri.id
+                            WHERE li.list_id = @listId";
+                        
+                        var param = cmd.CreateParameter();
+                        param.ParameterName = "@listId";
+                        param.Value = listId;
+                        cmd.Parameters.Add(param);
+
+                        using (var reader = cmd.ExecuteReader())
+                        {
+                            while (reader.Read())
+                            {
+                                boothIds.Add(Convert.ToInt32(reader["booth_item_id"]));
+                            }
+                        }
+                    }
+                }
+                Debug.Log($"[BLM Standalone] Loaded {boothIds.Count} items for list {listId}");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[BLM Standalone] Error loading list items: {ex.Message}");
+            }
+#endif
+            return boothIds;
+        }
     }
 }

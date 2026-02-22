@@ -19,9 +19,8 @@
             <!-- Sidebar (Toggleable) -->
             <ui:VisualElement name="sidebar" class="sidebar">
                 <ui:TextField name="search-field" placeholder-text="Search assets..." class="search-bar" />
-                <ui:Label text="FILTERS" class="filter-label" />
-                <ui:Toggle name="filter-blm" label="BLM" value="true" />
-                <ui:Toggle name="filter-others" label="Others" value="true" />
+                <ui:Label text="FILTER" class="filter-label" />
+                <ui:VisualElement name="filter-dropdown-container" style="margin-bottom: 10px;" />
                 <ui:Button name="open-local-assets" text="📁 Open LocalAssets Folder" style="margin-top: 10px;" />
             </ui:VisualElement>
 

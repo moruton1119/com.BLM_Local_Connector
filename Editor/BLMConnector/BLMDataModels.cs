@@ -55,4 +55,22 @@ namespace Moruton.BLMConnector
         public string fullPath;
         public AssetType assetType;
     }
+
+    [Serializable]
+    public class BoothList
+    {
+        public int id;
+        public string title;
+        public string description;
+        public string createdAt;
+        public string updatedAt;
+    }
+
+    public enum FilterType
+    {
+        AllProducts,
+        BLMProducts,
+        LocalProducts,
+        CustomList
+    }
 }
