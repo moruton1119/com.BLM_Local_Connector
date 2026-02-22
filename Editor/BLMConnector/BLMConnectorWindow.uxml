@@ -61,7 +61,7 @@
         <!-- Footer -->
         <ui:VisualElement class="footer">
             <ui:Label name="queue-status" text="Queue is empty" class="queue-status" style="color: #aaaaaa; font-size: 11px; margin-bottom: 5px;" />
-            <ui:Toggle name="interactive-toggle" label="Show Import Dialog" value="true" style="margin-bottom: 5px; color: #white;" />
+            <ui:Toggle name="interactive-toggle" label="Show Import Dialog" value="true" style="margin-bottom: 5px;" />
             <ui:VisualElement style="flex-direction: row; justify-content: flex-end; width: 100%;">
                 <ui:Button name="view-queue" text="View List" style="margin-right: 5px;" />
                 <ui:Button name="reset-queue" text="Clear Queue" style="margin-right: 5px;" />
