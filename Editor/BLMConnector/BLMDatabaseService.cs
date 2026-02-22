@@ -80,12 +80,10 @@ namespace Moruton.BLMConnector
                                     name = reader["name"].ToString(),
                                     shopName = reader["shop_name"] != DBNull.Value ? reader["shop_name"].ToString() : "Unknown",
                                     shopSubdomain = reader["shop_subdomain"] != DBNull.Value ? reader["shop_subdomain"].ToString() : "",
-                                    thumbnailUrl = reader["thumbnail_url"] != DBNull.Value ? reader["thumbnail_url"].ToString() : "",
-                                    sourceType = "BLM"
+                                    thumbnailUrl = reader["thumbnail_url"] != DBNull.Value ? reader["thumbnail_url"].ToString() : ""
                                 };
                                 
-                                // BLMのフォルダ構造: {libraryRoot}\b{id}
-                                string productPath = Path.Combine(currentLibraryRoot, $"b{p.id}");
+                                string productPath = Path.Combine(currentLibraryRoot, p.shopSubdomain, p.id);
 
                                 if (!Directory.Exists(productPath))
                                 {
@@ -101,9 +99,6 @@ namespace Moruton.BLMConnector
                                 string jpg = Path.Combine(cacheDir, $"{p.id}.jpg");
                                 if (File.Exists(png)) p.thumbnailPath = png;
                                 else if (File.Exists(jpg)) p.thumbnailPath = jpg;
-
-                                // アセットを読み込む
-                                p.assets = FindProductAssets(p.id, productPath);
 
                                 products.Add(p);
                             }
@@ -127,52 +122,16 @@ namespace Moruton.BLMConnector
             {
                 using (var cmd = connection.CreateCommand())
                 {
-                    // preferences テーブルは key-value 形式ではなく、カラムとして item_directory_path を持つ
-                    cmd.CommandText = "SELECT item_directory_path FROM preferences LIMIT 1";
+                    cmd.CommandText = "SELECT value FROM preferences WHERE key = 'library_root'";
                     var result = cmd.ExecuteScalar();
-                    
-                    if (result != null)
-                    {
-                        string path = null;
-                        
-                        // BLOB型の場合はbyte[]としてデコード
-                        if (result is byte[] bytes)
-                        {
-                            Debug.Log($"[BLM Debug] BLOB byte length: {bytes.Length}");
-                            Debug.Log($"[BLM Debug] BLOB hex: {BitConverter.ToString(bytes)}");
-                            
-                            // UTF-16 LE (Little Endian) でデコード - BLMはこの形式を使用
-                            path = System.Text.Encoding.Unicode.GetString(bytes);
-                            Debug.Log($"[BLM Debug] UTF-16 decoded: {path}");
-                            
-                            // もしUTF-16で正しく取得できない場合、UTF-8を試す
-                            if (string.IsNullOrEmpty(path) || path.Length < 3)
-                            {
-                                path = System.Text.Encoding.UTF8.GetString(bytes);
-                                Debug.Log($"[BLM Debug] UTF-8 decoded: {path}");
-                            }
-                        }
-                        else
-                        {
-                            path = result.ToString();
-                            Debug.Log($"[BLM Debug] Found item_directory_path (TEXT): {path}");
-                        }
-                        
-                        return path;
-                    }
-                    else
-                    {
-                        Debug.LogWarning("[BLM Debug] item_directory_path column is NULL or empty.");
-                    }
-                    
-                    return null;
+                    if (result != null) return result.ToString();
+
+                    cmd.CommandText = "SELECT value FROM preferences WHERE key = 'item_directory_path'";
+                    result = cmd.ExecuteScalar();
+                    return result?.ToString();
                 }
             }
-            catch (Exception ex)
-            { 
-                Debug.LogError($"[BLM Debug] Error reading preferences: {ex.Message}");
-                return null; 
-            }
+            catch { return null; }
         }
 #endif
 
@@ -226,7 +185,7 @@ namespace Moruton.BLMConnector
         private static bool IsMatch(string path, string id, List<string> keywords, string shop)
         {
             string name = Path.GetFileName(path);
-            if (name.Contains(id)) return true;
+            if (name.Contains(id)) return true; 
             if (!string.IsNullOrEmpty(shop) && name.IndexOf(shop, StringComparison.OrdinalIgnoreCase) >= 0) return true;
             foreach (var kw in keywords) if (name.IndexOf(kw, StringComparison.OrdinalIgnoreCase) >= 0) return true;
             return false;
@@ -244,55 +203,6 @@ namespace Moruton.BLMConnector
                 }
             }
             return packages;
-        }
-
-        public static List<BoothAsset> FindProductAssets(string productId, string rootPath)
-        {
-            var assets = new List<BoothAsset>();
-            if (!string.IsNullOrEmpty(rootPath) && Directory.Exists(rootPath))
-            {
-                // サポートする拡張子 (.blend は Unity で認識できないため除外)
-                string[] extensions = {
-                    "*.unitypackage",
-                    "*.png", "*.jpg", "*.jpeg", "*.tga", "*.psd",
-                    "*.fbx", "*.obj",
-                    "*.wav", "*.mp3", "*.ogg"
-                };
-
-                foreach (var ext in extensions)
-                {
-                    var files = Directory.GetFiles(rootPath, ext, SearchOption.AllDirectories);
-                    foreach (var file in files)
-                    {
-                        assets.Add(new BoothAsset
-                        {
-                            fileName = Path.GetFileName(file),
-                            fullPath = file,
-                            assetType = GetAssetType(Path.GetExtension(file))
-                        });
-                    }
-                }
-            }
-            return assets;
-        }
-
-        private static AssetType GetAssetType(string extension)
-        {
-            switch (extension.ToLower())
-            {
-                case ".unitypackage": return AssetType.UnityPackage;
-                case ".png":
-                case ".jpg":
-                case ".jpeg":
-                case ".tga":
-                case ".psd": return AssetType.Texture;
-                case ".fbx":
-                case ".obj": return AssetType.Model;
-                case ".wav":
-                case ".mp3":
-                case ".ogg": return AssetType.Audio;
-                default: return AssetType.Other;
-            }
         }
     }
 }

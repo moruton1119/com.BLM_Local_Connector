@@ -14,10 +14,8 @@ namespace Moruton.BLMConnector
         public string thumbnailUrl;
         public string rootFolderPath;
         public string shopSubdomain;
-        public string sourceType; // "BLM" or "Local"
 
         public List<BoothPackage> packages = new List<BoothPackage>();
-        public List<BoothAsset> assets = new List<BoothAsset>();
     }
 
     [Serializable]
@@ -37,22 +35,5 @@ namespace Moruton.BLMConnector
         FXT,
         Texture,
         Optional
-    }
-
-    public enum AssetType
-    {
-        UnityPackage,
-        Texture,
-        Model,
-        Audio,
-        Other
-    }
-
-    [Serializable]
-    public class BoothAsset
-    {
-        public string fileName;
-        public string fullPath;
-        public AssetType assetType;
     }
 }
