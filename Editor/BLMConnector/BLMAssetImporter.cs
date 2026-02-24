@@ -16,41 +16,39 @@ namespace Moruton.BLMConnector
             }
             else
             {
-                // 商品ごとにフォルダを作成 (オプションA)
-                string sanitizedProductName = SanitizeFolderName(productName);
-                string destinationFolder = Path.Combine(DefaultImportFolder, sanitizedProductName);
-                
-                // フォルダが存在しない場合は作成
-                if (!Directory.Exists(destinationFolder))
+                string projectPath = Directory.GetParent(Application.dataPath)?.FullName;
+                if (string.IsNullOrEmpty(projectPath))
                 {
-                    Directory.CreateDirectory(destinationFolder);
+                    Debug.LogError("[BLM] Failed to get project path");
+                    return;
                 }
 
-                // Assets配下にコピー
-                string destPath = Path.Combine(destinationFolder, asset.fileName);
-                File.Copy(asset.fullPath, destPath, true);
+                string sanitizedProductName = SanitizeFolderName(productName);
+                string absoluteDestFolder = Path.Combine(projectPath, DefaultImportFolder, sanitizedProductName);
+                
+                if (!Directory.Exists(absoluteDestFolder))
+                {
+                    Directory.CreateDirectory(absoluteDestFolder);
+                }
+
+                string absoluteDestPath = Path.Combine(absoluteDestFolder, asset.fileName);
+                File.Copy(asset.fullPath, absoluteDestPath, true);
                 AssetDatabase.Refresh();
 
-                // インポート後の設定（テクスチャの場合）
+                string relativeAssetPath = $"{DefaultImportFolder}/{sanitizedProductName}/{asset.fileName}";
+                
                 if (asset.assetType == AssetType.Texture)
                 {
-                    ConfigureTextureImportSettings(destPath);
+                    ConfigureTextureImportSettings(relativeAssetPath);
                 }
 
-                Debug.Log($"[BLM] Imported {asset.fileName} to {destPath}");
+                Debug.Log($"[BLM] Imported {asset.fileName} to {relativeAssetPath}");
             }
         }
 
-        private static void ConfigureTextureImportSettings(string assetPath)
+        private static void ConfigureTextureImportSettings(string relativeAssetPath)
         {
-            // Assetsフォルダからの相対パスに変換
-            string relativePath = assetPath.Replace("\\", "/");
-            if (relativePath.StartsWith(Application.dataPath))
-            {
-                relativePath = "Assets" + relativePath.Substring(Application.dataPath.Length);
-            }
-
-            TextureImporter importer = AssetImporter.GetAtPath(relativePath) as TextureImporter;
+            TextureImporter importer = AssetImporter.GetAtPath(relativeAssetPath) as TextureImporter;
             if (importer != null)
             {
                 importer.textureType = TextureImporterType.Default;

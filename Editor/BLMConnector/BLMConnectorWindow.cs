@@ -651,12 +651,38 @@ namespace Moruton.BLMConnector
                 return;
             }
 
-            bool confirm = EditorUtility.DisplayDialog(
-                "Delete Imported Assets",
-                $"Delete the following folder from your project?\n\n{path}",
-                "Delete", "Cancel");
+            var otherProductIds = labels
+                .Where(l => l.StartsWith("BLM_PID_") && l != $"BLM_PID_{productId}")
+                .Select(l => l.Substring("BLM_PID_".Length))
+                .ToList();
 
-            if (!confirm) return;
+            if (otherProductIds.Count > 0)
+            {
+                string otherNames = string.Join("\n", otherProductIds.Take(5).Select(id => $"• Product ID: {id}"));
+                if (otherProductIds.Count > 5)
+                    otherNames += $"\n... and {otherProductIds.Count - 5} more";
+
+                bool proceed = EditorUtility.DisplayDialog(
+                    "Warning: Shared Folder",
+                    $"This folder contains other products:\n{otherNames}\n\nDeleting will remove ALL contents including other products.\n\nTarget: {path}",
+                    "Delete Anyway", "Cancel");
+
+                if (!proceed) return;
+            }
+            else
+            {
+                bool confirm = EditorUtility.DisplayDialog(
+                    "Delete Imported Assets",
+                    $"Delete the following folder from your project?\n\n{path}",
+                    "Delete", "Cancel");
+
+                if (!confirm) return;
+            }
+
+            foreach (var otherPid in otherProductIds)
+            {
+                BLMHistory.Unmark(otherPid);
+            }
 
             AssetDatabase.DeleteAsset(path);
             BLMHistory.Unmark(productId);
@@ -762,22 +788,33 @@ namespace Moruton.BLMConnector
 
         private void ImportAsset(BoothAsset asset, BoothProduct product)
         {
-            AssetImportQueue.StartManualImport(product.id);
-            try
+            if (asset.assetType == AssetType.UnityPackage)
             {
-                BLMAssetImporter.ImportAsset(asset, product.name);
                 importedProductIds.Add(product.id);
-                Debug.Log($"[BLM] Successfully imported {asset.fileName}");
-                ApplyFilters();
-                UpdateDetailFooter(product);
+                AssetImportQueue.Enqueue(asset.fullPath, product.id);
+                AssetImportQueue.StartImport();
+                UpdateQueueStatus();
+                ShowQueueList();
             }
-            catch (Exception ex)
+            else
             {
-                Debug.LogError($"[BLM] Failed to import {asset.fileName}: {ex.Message}");
-            }
-            finally
-            {
-                AssetImportQueue.EndManualImport();
+                AssetImportQueue.StartManualImport(product.id);
+                try
+                {
+                    BLMAssetImporter.ImportAsset(asset, product.name);
+                    importedProductIds.Add(product.id);
+                    Debug.Log($"[BLM] Successfully imported {asset.fileName}");
+                    ApplyFilters();
+                    UpdateDetailFooter(product);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"[BLM] Failed to import {asset.fileName}: {ex.Message}");
+                }
+                finally
+                {
+                    AssetImportQueue.EndManualImport();
+                }
             }
         }
 
