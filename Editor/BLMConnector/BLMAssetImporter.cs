@@ -6,8 +6,6 @@ namespace Moruton.BLMConnector
 {
     public static class BLMAssetImporter
     {
-        private const string DefaultImportFolder = "Assets/BLM_Imports";
-
         public static void ImportAsset(BoothAsset asset, string productName)
         {
             if (asset.assetType == AssetType.UnityPackage)
@@ -24,7 +22,7 @@ namespace Moruton.BLMConnector
                 }
 
                 string sanitizedProductName = SanitizeFolderName(productName);
-                string absoluteDestFolder = Path.Combine(projectPath, DefaultImportFolder, sanitizedProductName);
+                string absoluteDestFolder = Path.Combine(projectPath, BLMConstants.DefaultImportFolder, sanitizedProductName);
                 
                 if (!Directory.Exists(absoluteDestFolder))
                 {
@@ -35,7 +33,7 @@ namespace Moruton.BLMConnector
                 File.Copy(asset.fullPath, absoluteDestPath, true);
                 AssetDatabase.Refresh();
 
-                string relativeAssetPath = $"{DefaultImportFolder}/{sanitizedProductName}/{asset.fileName}";
+                string relativeAssetPath = $"{BLMConstants.DefaultImportFolder}/{sanitizedProductName}/{asset.fileName}";
                 
                 if (asset.assetType == AssetType.Texture)
                 {
@@ -58,16 +56,14 @@ namespace Moruton.BLMConnector
 
         private static string SanitizeFolderName(string name)
         {
-            // ファイル名に使用できない文字を除去
             char[] invalidChars = Path.GetInvalidFileNameChars();
             foreach (char c in invalidChars)
             {
                 name = name.Replace(c, '_');
             }
-            // 長すぎる名前を短縮
-            if (name.Length > 50)
+            if (name.Length > BLMConstants.MaxFolderNameLength)
             {
-                name = name.Substring(0, 50);
+                name = name.Substring(0, BLMConstants.MaxFolderNameLength);
             }
             return name;
         }
